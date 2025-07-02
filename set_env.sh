@@ -13,6 +13,14 @@ REPO_NAME="introveally-repo"
 MAPKEY_FILE="~/mapkey.txt"
 # ---------------------
 
+# --- Docker Configuration ---
+DOCKER_IMAGE_NAME="a2a-inspector"
+DOCKER_CONTAINER_NAME="a2a-inspector" # Usually the same as the image name
+GIT_REPO_URL="https://github.com/weimeilin79/a2a-inspector.git"
+# Define the local directory for the clone. Using $HOME is safer in scripts.
+GIT_REPO_DIR="$HOME/a2a-inspector"
+# ---------------------
+
 echo "--- Setting Google Cloud Environment Variables ---"
 
 # --- Authentication Check ---
@@ -110,4 +118,78 @@ if [ -f "$MAPKEY_FILE_PATH" ]; then
   fi
 fi
 
+echo ""
+echo "--- Docker Environment Check & Setup ---"
+
+# --- Prerequisite checks for Docker ---
+echo "Checking for required tools (git, docker)..."
+if ! command -v git &> /dev/null; then
+  echo "Error: git is not installed. Please install git."
+  return 1
+fi
+# Check if docker command exists AND the daemon is responsive
+if ! command -v docker &> /dev/null || ! docker info >/dev/null 2>&1; then
+  echo "Error: Docker is not installed or the Docker daemon is not running."
+  return 1
+fi
+echo "All required tools are present."
+
+# --- Main Docker Logic ---
+# Check if the container is already running. Using ^ and $ for an exact name match.
+if [ "$(docker ps -q -f name=^/${DOCKER_CONTAINER_NAME}$)" ]; then
+    echo "Docker container '$DOCKER_CONTAINER_NAME' is already running. No action needed."
+else
+    echo "Container '$DOCKER_CONTAINER_NAME' is not running. Proceeding with setup..."
+
+    # Check if the image exists. If not, build it.
+    if [[ -z "$(docker images -q ${DOCKER_IMAGE_NAME} 2> /dev/null)" ]]; then
+        echo "Docker image '$DOCKER_IMAGE_NAME' not found. Cloning repo and building..."
+
+        # Use a subshell to avoid changing the user's current directory
+        (
+            set -e # Exit subshell immediately if a command fails
+            echo "Changing to home directory: $HOME"
+            cd "$HOME"
+            if [ -d "$GIT_REPO_DIR" ]; then
+                echo "Removing existing repository directory for a fresh clone."
+                rm -rf "$GIT_REPO_DIR"
+            fi
+            echo "Cloning repository from $GIT_REPO_URL..."
+            git clone "$GIT_REPO_URL" "$GIT_REPO_DIR"
+            cd "$GIT_REPO_DIR"
+            echo "Building Docker image '$DOCKER_IMAGE_NAME'..."
+            docker build -t "$DOCKER_IMAGE_NAME" .
+        )
+
+        # Check the exit code of the subshell
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to clone repository or build the Docker image."
+            return 1
+        fi
+        echo "Docker image built successfully."
+    else
+        echo "Docker image '$DOCKER_IMAGE_NAME' already exists."
+    fi
+
+    # At this point, the image is guaranteed to exist. Now, run the container.
+
+    # Remove any stopped container with the same name to avoid conflicts
+    if [ "$(docker ps -aq -f status=exited -f name=^/${DOCKER_CONTAINER_NAME}$)" ]; then
+        echo "Removing stopped container with the same name..."
+        docker rm "$DOCKER_CONTAINER_NAME"
+    fi
+
+    echo "Starting container '$DOCKER_CONTAINER_NAME'..."
+    docker run -d -p 8081:8080 --name "$DOCKER_CONTAINER_NAME" "$DOCKER_IMAGE_NAME"
+
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to start the Docker container."
+        return 1
+    fi
+    echo "Container started successfully."
+    echo "You can access the application on this machine at: http://localhost:8081"
+fi
+
+
+echo ""
 echo "--- Environment setup complete ---"
