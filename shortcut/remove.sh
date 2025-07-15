@@ -7,6 +7,10 @@
 # WARNING: This operation is destructive and cannot be undone.
 #
 
+# --- Helper Functions ---
+log() {
+  echo "✅  $1"
+}
 
 
 # --- User-configurable variables ---
